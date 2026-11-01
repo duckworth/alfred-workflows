@@ -148,10 +148,14 @@ def format_totp_result(
 
             sanitized_service_name = sanitize_service_name(account.service_name)
 
+            show_username = bool(account.username) and (
+                account.username.casefold() != account.service_name.casefold()
+            )
+
             # Conditionally add username to title and subtitle
             title = (
                 f"{account.service_name} - {account.username}"
-                if account.username and username_in_title
+                if show_username and username_in_title
                 else account.service_name
             )
             # Pin icon is always appended to the title if pinned
@@ -159,7 +163,7 @@ def format_totp_result(
                 title += " 📌"
 
             subtitle = f"Current TOTP: {current_totp} | Next TOTP: {next_totp}, {time_remaining} seconds left"
-            if account.username and username_in_subtitle:
+            if show_username and username_in_subtitle:
                 subtitle += f" - {account.username}"
 
             uid_base = (uid_seed or "") + account.service_name + account.username

@@ -1,8 +1,9 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 from src import models
@@ -59,6 +60,16 @@ class ParseEnteExportTests(unittest.TestCase):
 
 
 class FormatTotpResultTests(unittest.TestCase):
+    def test_distinct_username_is_still_displayed(self):
+        accounts = TotpAccounts([TotpAccount("Porkbun", "person", SECRET)])
+        with patch.dict(
+            os.environ,
+            {"USERNAME_IN_TITLE": "True", "USERNAME_IN_SUBTITLE": "True"},
+        ):
+            [item] = format_totp_result(accounts).items
+        self.assertEqual(item.title, "Porkbun - person")
+        self.assertTrue(item.subtitle.endswith(" - person"))
+
     def test_uses_selected_icon_then_service_icon(self):
         selected = TotpAccount(
             "Example", "one", SECRET, icon_src="customIcon", icon_id="github"
@@ -87,8 +98,34 @@ class IssuerParsingTests(unittest.TestCase):
         if issuer is not None:
             params["issuer"] = issuer
         uri = f"otpauth://totp/{label}?{urlencode(params)}"
-        with patch("builtins.open", mock_open(read_data=uri)):
-            return parse_ente_export(Path("synthetic-export.txt"))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ente_auth.txt"
+            path.write_text(uri)
+            return parse_ente_export(path)
+
+    def test_matching_label_and_issuer_keep_username_but_hide_duplicate_text(self):
+        for label in ["Porkbun", "pOrKbUn"]:
+            with self.subTest(label=label):
+                accounts = self.parse(label, "Porkbun")
+                with patch.dict(
+                    os.environ,
+                    {"USERNAME_IN_TITLE": "True", "USERNAME_IN_SUBTITLE": "True"},
+                ):
+                    [item] = format_totp_result(accounts).items
+                self.assertEqual(item.title, "Porkbun")
+                self.assertNotIn("porkbun", item.subtitle.casefold())
+                self.assertEqual(accounts[0].username, label)
+                self.assertEqual(item.variables["selected_username"], label)
+
+    def test_duplicate_username_has_same_search_score_as_no_username(self):
+        for label in ["Porkbun", "pOrKbUn"]:
+            duplicate = self.parse(label, "Porkbun")[0]
+            no_username = self.parse("Porkbun")[0]
+            for ordered in [[no_username, duplicate], [duplicate, no_username]]:
+                with self.subTest(label=label, first_username=ordered[0].username):
+                    with patch("src.utils.get_local_usage", return_value=0):
+                        results = fuzzy_search_accounts("pork", TotpAccounts(ordered))
+                    self.assertEqual(results, ordered)
 
     def test_issuer_only_service_survives_storage_and_is_searchable(self):
         accounts = self.parse("test%40example.com", "Porkbun")
