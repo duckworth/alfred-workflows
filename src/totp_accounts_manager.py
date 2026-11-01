@@ -4,8 +4,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-
-
 from src.models import (
     AlfredOutput,
     AlfredOutputItem,
@@ -45,6 +43,11 @@ def parse_ente_export(file_path: Path) -> TotpAccounts:
                         service_name, username = path_items[0].strip(":"), ""
 
                     query_params = parse_qs(parsed_uri.query)
+                    issuer = query_params.get("issuer", [""])[0].strip()
+                    if issuer:
+                        if len(path_items) == 1:
+                            username = path_items[0]
+                        service_name = issuer
                     secret = query_params.get("secret", [None])[0]
                     period = query_params.get("period", [None])[0]
                     code_display_str = query_params.get("codeDisplay", [None])[0]
@@ -116,7 +119,9 @@ def parse_ente_export(file_path: Path) -> TotpAccounts:
     return accounts
 
 
-def format_totp_result(accounts: TotpAccounts, uid_seed: str | None = None) -> AlfredOutput:
+def format_totp_result(
+    accounts: TotpAccounts, uid_seed: str | None = None
+) -> AlfredOutput:
     """Transforms a TotpAccounts object into an AlfredOutput object."""
     import pyotp
 

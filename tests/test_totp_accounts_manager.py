@@ -2,12 +2,13 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 from urllib.parse import urlencode
 
 from src import models
 from src.models import TotpAccount, TotpAccounts
 from src.totp_accounts_manager import format_totp_result, parse_ente_export
+from src.utils import fuzzy_search_accounts
 
 SECRET = "JBSWY3DPEHPK3PXP"
 SVG = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>'
@@ -78,6 +79,45 @@ class FormatTotpResultTests(unittest.TestCase):
             [Path(item.icon.path).name for item in result.items],
             [f"{selected.selected_icon_name}.svg", "example.svg", "example.svg"],
         )
+
+
+class IssuerParsingTests(unittest.TestCase):
+    def parse(self, label, issuer=None):
+        params = {"secret": "JBSWY3DPEHPK3PXP", "period": "30"}
+        if issuer is not None:
+            params["issuer"] = issuer
+        uri = f"otpauth://totp/{label}?{urlencode(params)}"
+        with patch("builtins.open", mock_open(read_data=uri)):
+            return parse_ente_export(Path("synthetic-export.txt"))
+
+    def test_issuer_only_service_survives_storage_and_is_searchable(self):
+        accounts = self.parse("test%40example.com", "Porkbun")
+        stored = TotpAccounts.from_json(accounts.to_json())
+        with patch("src.utils.get_local_usage", return_value=0):
+            results = fuzzy_search_accounts("pork", stored)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].service_name, "Porkbun")
+        self.assertEqual(results[0].username, "test@example.com")
+
+    def test_issuer_and_label_prefix_preserve_username(self):
+        account = self.parse("Porkbun:test%40example.com", "Porkbun")[0]
+        self.assertEqual(account.service_name, "Porkbun")
+        self.assertEqual(account.username, "test@example.com")
+
+    def test_label_prefix_still_works_without_issuer(self):
+        account = self.parse("Porkbun:test%40example.com")[0]
+        self.assertEqual(account.service_name, "Porkbun")
+        self.assertEqual(account.username, "test@example.com")
+
+    def test_plain_label_still_works_without_issuer(self):
+        account = self.parse("Porkbun")[0]
+        self.assertEqual(account.service_name, "Porkbun")
+        self.assertEqual(account.username, "")
+
+    def test_blank_issuer_falls_back_to_label(self):
+        account = self.parse("Porkbun:test%40example.com", " ")[0]
+        self.assertEqual(account.service_name, "Porkbun")
+        self.assertEqual(account.username, "test@example.com")
 
 
 if __name__ == "__main__":
